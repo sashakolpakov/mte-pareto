@@ -30,6 +30,8 @@ The empirical target is deliberately narrow: `a < log 2` is evidence for a
 heavier-than-pure-Omega tail inside the Omega energy scale. These scripts are
 targeted validation of that diagnostic, not a search for the best distributional
 model of Debian or PyPI file sizes.
+Use additional datasets to test whether the same Omega-tail diagnostic recurs,
+not to run a broad competitor sweep.
 
 ## Usage
 
@@ -72,6 +74,21 @@ python debian_analysis.py --dataset source --file-kind all --output-prefix debia
 
 `--file-kind archives` excludes `.dsc` control files; `--file-kind dsc` keeps
 only source-control files.
+
+### CRAN Source Package Sizes
+
+Fetch a deterministic sample of CRAN source package archives using the CRAN
+package index and HTTP content lengths:
+
+```bash
+python cran_analysis.py --max-packages 750 --bootstrap 1000 --sizes-csv cran_source_archive_sizes.csv
+```
+
+Use cached sizes:
+
+```bash
+python cran_analysis.py --use-sizes-csv --sizes-csv cran_source_archive_sizes.csv --bootstrap 1000
+```
 
 ## Outputs
 

@@ -162,6 +162,7 @@ dmypy.json
 *_model_metrics.csv
 *_package_sizes.csv
 *_file_sizes.csv
+*_archive_sizes.csv
 
 # Pyre type checker
 .pyre/
