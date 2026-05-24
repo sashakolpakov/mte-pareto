@@ -45,24 +45,36 @@ the right panel compares it with the fitted scaled-Omega model.
 <th>Dataset</th>
 <th>Pure Omega reference</th>
 <th>Fitted scaled Omega</th>
+<th>Key</th>
 </tr>
 <tr>
 <td>Debian binary packages</td>
 <td><img src="debian_sizes_priors.png" alt="Debian empirical codelength histogram versus pure Omega reference" width="330"/></td>
 <td><img src="debian_sizes_prior_scaled.png" alt="Debian empirical codelength histogram versus fitted scaled-Omega model" width="330"/></td>
+<td>black points: empirical<br/>blue solid/dashed: pure Omega<br/>red solid: fitted scaled Omega</td>
 </tr>
 <tr>
 <td>PyPI latest-release files</td>
 <td><img src="pypi_sizes_priors.png" alt="PyPI empirical codelength histogram versus pure Omega reference" width="330"/></td>
 <td><img src="pypi_sizes_prior_scaled.png" alt="PyPI empirical codelength histogram versus fitted scaled-Omega model" width="330"/></td>
+<td>black points: empirical<br/>blue solid/dashed: pure Omega<br/>red solid: fitted scaled Omega</td>
 </tr>
 <tr>
 <td>CRAN source archives</td>
 <td><img src="cran_sizes_priors.png" alt="CRAN empirical codelength histogram versus pure Omega reference" width="330"/></td>
 <td><img src="cran_sizes_prior_scaled.png" alt="CRAN empirical codelength histogram versus fitted scaled-Omega model" width="330"/></td>
+<td>black points: empirical<br/>blue solid/dashed: pure Omega<br/>red solid: fitted scaled Omega</td>
 </tr>
 </table>
 </div>
+
+Latest full pipeline run:
+
+| Dataset | Analysis n | fitted a (95% CI) | KL pure | KL scaled |
+| --- | ---: | ---: | ---: | ---: |
+| Debian binary packages | 52,399 | 0.1979 [0.1965, 0.1993] | 1.6066 | 0.0998 |
+| PyPI latest-release files | 5,093 | 0.3047 [0.2963, 0.3135] | 0.4226 | 0.0734 |
+| CRAN source archives | 472 | 0.0734 [0.0339, 0.1168] | 0.6598 | 0.0330 |
 
 ## Usage
 

@@ -412,8 +412,6 @@ def save_figures(
             "savefig.dpi": 300,
             "font.size": 10,
             "axes.labelsize": 10,
-            "axes.titlesize": 11,
-            "legend.fontsize": 8.5,
             "axes.grid": True,
             "grid.alpha": 0.28,
             "grid.linestyle": ":",
@@ -426,14 +424,11 @@ def save_figures(
     ax.semilogy(vals, pure.probabilities, "-", color="#1f77b4", label="pure Omega, a=log 2")
     ax.set_xlabel(r"Elias Omega codelength $\ell_\Omega$")
     ax.set_ylabel(r"Probability mass on observed support")
-    ax.set_title(f"{label}: pure Omega reference")
-    ax.legend(frameon=False)
     fig.savefig(prior_path, bbox_inches="tight", metadata=metadata)
     if show:
         plt.show()
     plt.close(fig)
 
-    scaled_a = scaled.params["a"]
     fig, ax = plt.subplots(constrained_layout=True)
     ax.semilogy(vals, empirical, "o", color="black", label="empirical")
     ax.semilogy(
@@ -441,13 +436,11 @@ def save_figures(
         scaled.probabilities,
         "-",
         color="#d62728",
-        label=fr"scaled Omega MLE, $a={scaled_a:.3g}$",
+        label="scaled Omega MLE",
     )
     ax.semilogy(vals, pure.probabilities, "--", color="#1f77b4", alpha=0.72, label="pure Omega")
     ax.set_xlabel(r"Elias Omega codelength $\ell_\Omega$")
     ax.set_ylabel(r"Probability mass on observed support")
-    ax.set_title(f"{label}: Omega tail-regime diagnostic")
-    ax.legend(frameon=False)
     fig.savefig(fitted_path, bbox_inches="tight", metadata=metadata)
     if show:
         plt.show()
