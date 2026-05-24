@@ -33,6 +33,37 @@ model of Debian or PyPI file sizes.
 Use additional datasets to test whether the same Omega-tail diagnostic recurs,
 not to run a broad competitor sweep.
 
+## Figures
+
+The repository includes the generated diagnostic figures. In each row, the left
+panel compares the empirical codelength histogram with the pure Omega reference;
+the right panel compares it with the fitted scaled-Omega model.
+
+<div align="center">
+<table>
+<tr>
+<th>Dataset</th>
+<th>Pure Omega reference</th>
+<th>Fitted scaled Omega</th>
+</tr>
+<tr>
+<td>Debian binary packages</td>
+<td><img src="debian_sizes_priors.png" alt="Debian empirical codelength histogram versus pure Omega reference" width="330"/></td>
+<td><img src="debian_sizes_prior_scaled.png" alt="Debian empirical codelength histogram versus fitted scaled-Omega model" width="330"/></td>
+</tr>
+<tr>
+<td>PyPI latest-release files</td>
+<td><img src="pypi_sizes_priors.png" alt="PyPI empirical codelength histogram versus pure Omega reference" width="330"/></td>
+<td><img src="pypi_sizes_prior_scaled.png" alt="PyPI empirical codelength histogram versus fitted scaled-Omega model" width="330"/></td>
+</tr>
+<tr>
+<td>CRAN source archives</td>
+<td><img src="cran_sizes_priors.png" alt="CRAN empirical codelength histogram versus pure Omega reference" width="330"/></td>
+<td><img src="cran_sizes_prior_scaled.png" alt="CRAN empirical codelength histogram versus fitted scaled-Omega model" width="330"/></td>
+</tr>
+</table>
+</div>
+
 ## Usage
 
 ### PyPI Latest-Release File Sizes
