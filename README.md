@@ -1,55 +1,85 @@
 # Multiplicative Turing Ensembles, Pareto's Law, and Creativity
 
+Empirical support code for the manuscript. The scripts fetch software-size
+datasets, convert byte sizes to Elias Omega codelengths, and run a compact
+finite-support diagnostic for the resulting codelength histograms.
+
 ## Installation
 
-Clone the repository:
 ```bash
-git clone https://github.com/yourusername/mte-pareto.git
+git clone https://github.com/sashakolpakov/mte-pareto.git
 cd mte-pareto
+python -m pip install numpy matplotlib
 ```
 
-Install dependencies:
-```bash
-pip install requests numpy matplotlib
+## Revised Analysis
+
+The scaled Omega model is now fit by multinomial likelihood on the observed
+codelength support:
+
+```text
+q_a(ell) = exp(-a ell) / sum_{ell in support} exp(-a ell)
 ```
+
+The normalizing constant is determined by the support, so there is no separate
+free intercept. Each run reports KL divergence and log-likelihood for the pure
+Omega slope `a = log 2` and the fitted scaled-Omega slope. It also reports
+bootstrap confidence intervals for the fitted slope and KL.
+
+The empirical target is deliberately narrow: `a < log 2` is evidence for a
+heavier-than-pure-Omega tail inside the Omega energy scale. These scripts are
+targeted validation of that diagnostic, not a search for the best distributional
+model of Debian or PyPI file sizes.
 
 ## Usage
 
-### PyPI Analysis
-Analyzes package sizes from the top PyPI packages:
+### PyPI Latest-Release File Sizes
+
+Fetch the top PyPI projects and analyze latest-release distribution files:
+
 ```bash
-python pypi_analysis.py
+python pypi_analysis.py --max-packages 750 --bootstrap 1000 --sizes-csv pypi_file_sizes.csv
 ```
 
-### Debian Analysis
-Analyzes package sizes from Debian stable repository:
+Use cached sizes for a deterministic rerun:
+
 ```bash
-python debian_analysis.py
+python pypi_analysis.py --use-sizes-csv --sizes-csv pypi_file_sizes.csv --bootstrap 1000
 ```
 
-## Results
+### Debian Binary Package Sizes
 
-Below we can see an empirical comparison between the actual PyPI package lengths distribution, the Gibbs prior (with self-delimiting Elias' length), and the uniform baseline (left). The rescaled Gibbs prior matches the empirical distribution quite closely (right). 
+This reproduces the manuscript's Debian `.deb` package-size analysis:
 
-The first two figures are output by `pypi_analysis.py`
+```bash
+python debian_analysis.py --dataset binary --suite stable --component main --arch amd64 --bootstrap 1000
+```
 
-<div align="center">
-<table>
-<tr>
-<td><img src="pypi_sizes_priors.png" alt="PyPI Sizes vs Gibbs / Uniform" width="400"/></td>
-<td><img src="pypi_sizes_prior_scaled.png" alt="PyPI Sizes with Scaled Gibbs Prior" width="400"/></td>
-</tr>
-</table>
-</div>
+Use cached sizes:
 
-The other two are output by `debian_analysis.py`
+```bash
+python debian_analysis.py --dataset binary --use-sizes-csv --sizes-csv debian_binary_package_sizes.csv --bootstrap 1000
+```
 
+### Debian Source File Sizes
 
-<div align="center">
-<table>
-<tr>
-<td><img src="debian_sizes_priors.png" alt=".deb Sizes vs Gibbs / Uniform" width="400"/></td>
-<td><img src="debian_sizes_prior_scaled.png" alt=".deb Sizes with Scaled Gibbs Prior" width="400"/></td>
-</tr>
-</table>
-</div>
+This is an additional socio-technical software-size dataset from Debian
+`Sources` indices:
+
+```bash
+python debian_analysis.py --dataset source --file-kind all --output-prefix debian_source --bootstrap 1000
+```
+
+`--file-kind archives` excludes `.dsc` control files; `--file-kind dsc` keeps
+only source-control files.
+
+## Outputs
+
+Each run prints an Omega-tail diagnostic table and writes:
+
+- `<prefix>_model_metrics.csv`
+- `<prefix>_sizes_priors.png`
+- `<prefix>_sizes_prior_scaled.png`
+- an optional raw size cache if `--sizes-csv` is supplied
+
+Figures are saved deterministically. Add `--show` to display them interactively.

@@ -158,6 +158,10 @@ venv.bak/
 .mypy_cache/
 .dmypy.json
 dmypy.json
+.matplotlib/
+*_model_metrics.csv
+*_package_sizes.csv
+*_file_sizes.csv
 
 # Pyre type checker
 .pyre/

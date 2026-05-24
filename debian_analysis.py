@@ -1,131 +1,290 @@
 #!/usr/bin/env python3
-"""
-debian_sizes_analysis.py
+"""Analyze Debian package/source file sizes with finite-support Omega diagnostics."""
 
-Fetches Debian .deb package sizes from the stable repository and analyzes
-their Elias Ω code‐length distribution against uniform, pure Ω, and fitted
-scaled Ω priors. Prints KL divergences and fitted parameters, and produces
-two log–log plots.
-"""
+from __future__ import annotations
 
-import requests
+import argparse
 import gzip
-from io import BytesIO
-from collections import Counter
-import numpy as np
-import matplotlib.pyplot as plt
+import lzma
+from urllib.request import Request, urlopen
 
-# ─── Elias Ω code‐length ───────────────────────────────────────────────────────
-def l_omega(n: int) -> int:
-    """
-    Elias Ω code length for integer n.
-    ℓΩ(1) = 1.
-    For n > 1: ℓΩ(n) = 1 + sum_{k = n, floor(log2 k), … > 1} floor(log2 k).
-    """
-    length = 1
-    k = n
-    while k > 1:
-        bits = k.bit_length()       # = floor(log2 k) + 1
-        length += bits - 1          # add floor(log2 k)
-        k = bits - 1                # next k
-    return length
+SOURCE_INDEX_URL = "https://deb.debian.org/debian/dists/{suite}/{component}/source/Sources.{ext}"
+BINARY_INDEX_URL = "https://deb.debian.org/debian/dists/{suite}/{component}/binary-{arch}/Packages.{ext}"
 
-# ─── Fetch Debian package sizes ───────────────────────────────────────────────
-def fetch_debian_package_sizes(dist='stable', component='main', arch='amd64'):
-    """
-    Downloads the Packages.gz index for the given Debian distribution/component/arch,
-    extracts all "Size: X" fields, and returns a list of sizes (in bytes).
-    """
-    url = f'https://ftp.debian.org/debian/dists/{dist}/{component}/binary-{arch}/Packages.gz'
-    resp = requests.get(url)
-    resp.raise_for_status()
-    # Decompress the .gz content
-    raw = gzip.decompress(resp.content)
-    text = raw.decode('utf-8', errors='ignore')
-    sizes = []
+
+def fetch_url(url: str, timeout: float) -> bytes:
+    request = Request(url, headers={"User-Agent": "mte-pareto-analysis/1.0"})
+    with urlopen(request, timeout=timeout) as response:
+        return response.read()
+
+
+def _decompress_source_index(payload: bytes, ext: str) -> str:
+    if ext == "gz":
+        raw = gzip.decompress(payload)
+    elif ext == "xz":
+        raw = lzma.decompress(payload)
+    else:
+        raise ValueError(f"Unsupported Debian Sources compression: {ext}")
+    return raw.decode("utf-8", errors="replace")
+
+
+def fetch_debian_sources_index(
+    suite: str = "stable",
+    component: str = "main",
+    timeout: float = 60.0,
+    compression: str = "auto",
+) -> tuple[str, str]:
+    """Fetch and decompress a Debian Sources index."""
+    extensions = ("xz", "gz") if compression == "auto" else (compression,)
+    errors: list[str] = []
+
+    for ext in extensions:
+        url = SOURCE_INDEX_URL.format(suite=suite, component=component, ext=ext)
+        try:
+            return _decompress_source_index(fetch_url(url, timeout), ext), url
+        except Exception as exc:  # pragma: no cover - depends on live Debian mirrors
+            errors.append(f"{url}: {exc}")
+
+    raise RuntimeError("Could not fetch Debian Sources index:\n" + "\n".join(errors))
+
+
+def fetch_debian_binary_index(
+    suite: str = "stable",
+    component: str = "main",
+    arch: str = "amd64",
+    timeout: float = 60.0,
+    compression: str = "auto",
+) -> tuple[str, str]:
+    """Fetch and decompress a Debian binary Packages index."""
+    extensions = ("xz", "gz") if compression == "auto" else (compression,)
+    errors: list[str] = []
+
+    for ext in extensions:
+        url = BINARY_INDEX_URL.format(suite=suite, component=component, arch=arch, ext=ext)
+        try:
+            return _decompress_source_index(fetch_url(url, timeout), ext), url
+        except Exception as exc:  # pragma: no cover - depends on live Debian mirrors
+            errors.append(f"{url}: {exc}")
+
+    raise RuntimeError("Could not fetch Debian Packages index:\n" + "\n".join(errors))
+
+
+def _iter_debian_control_paragraphs(text: str) -> list[dict[str, list[str]]]:
+    paragraphs: list[dict[str, list[str]]] = []
+    paragraph: dict[str, list[str]] = {}
+    current_key: str | None = None
+
     for line in text.splitlines():
-        if line.startswith('Size:'):
-            parts = line.split()
-            if len(parts) >= 2 and parts[1].isdigit():
-                sizes.append(int(parts[1]))
+        if not line.strip():
+            if paragraph:
+                paragraphs.append(paragraph)
+            paragraph = {}
+            current_key = None
+            continue
+
+        if line[0].isspace() and current_key is not None:
+            paragraph[current_key].append(line.strip())
+            continue
+
+        if ":" not in line:
+            current_key = None
+            continue
+
+        key, value = line.split(":", 1)
+        paragraph[key] = [value.strip()] if value.strip() else []
+        current_key = key
+
+    if paragraph:
+        paragraphs.append(paragraph)
+    return paragraphs
+
+
+def _matches_file_kind(filename: str, file_kind: str) -> bool:
+    if file_kind == "all":
+        return True
+    if file_kind == "dsc":
+        return filename.endswith(".dsc")
+    if file_kind == "archives":
+        return not filename.endswith(".dsc")
+    raise ValueError(f"Unsupported file kind: {file_kind}")
+
+
+def parse_debian_source_file_sizes(text: str, file_kind: str = "all") -> list[int]:
+    """Extract byte sizes from the Files field of Debian source stanzas."""
+    sizes: list[int] = []
+    for paragraph in _iter_debian_control_paragraphs(text):
+        for file_line in paragraph.get("Files", []):
+            parts = file_line.split()
+            if len(parts) < 3:
+                continue
+            _, size_text, filename = parts[0], parts[1], parts[2]
+            if not _matches_file_kind(filename, file_kind):
+                continue
+            try:
+                size = int(size_text)
+            except ValueError:
+                continue
+            if size > 0:
+                sizes.append(size)
     return sizes
 
-# ─── KL divergence ────────────────────────────────────────────────────────────
-def kl_div(p, q):
-    mask = (p > 0) & (q > 0)
-    return np.sum(p[mask] * np.log(p[mask] / q[mask]))
 
-# ─── Analysis & plotting ─────────────────────────────────────────────────────
-def analyze_sizes(sizes, cutoff_idx=5):
-    # 1) compute ℓΩ for each package size
-    ints   = [int(s) for s in sizes]
-    omegas = np.array([l_omega(x) for x in ints], dtype=int)
+def parse_debian_binary_package_sizes(text: str) -> list[int]:
+    """Extract installed archive byte sizes from Debian binary package stanzas."""
+    sizes: list[int] = []
+    for paragraph in _iter_debian_control_paragraphs(text):
+        size_values = paragraph.get("Size", [])
+        if not size_values:
+            continue
+        try:
+            size = int(size_values[0])
+        except ValueError:
+            continue
+        if size > 0:
+            sizes.append(size)
+    return sizes
 
-    # 2) empirical histogram of ℓΩ-values
-    counts = Counter(omegas)
-    vals   = np.array(sorted(counts.keys()), dtype=int)
-    freqs  = np.array([counts[v] for v in vals], dtype=float)
-    obs_p  = freqs / freqs.sum()
 
-    # 3) uniform prior over distinct ℓΩ-values
-    uni_p = np.ones_like(vals, dtype=float) / len(vals)
+def fetch_debian_source_file_sizes(
+    suite: str = "stable",
+    component: str = "main",
+    timeout: float = 60.0,
+    compression: str = "auto",
+    file_kind: str = "all",
+) -> tuple[list[int], str]:
+    text, url = fetch_debian_sources_index(
+        suite=suite,
+        component=component,
+        timeout=timeout,
+        compression=compression,
+    )
+    return parse_debian_source_file_sizes(text, file_kind=file_kind), url
 
-    # 4) pure Ω-prior ∝ 2^{-ℓΩ}
-    phys_raw = 2.0 ** (-vals)
-    phys_p   = phys_raw / phys_raw.sum()
 
-    # 5) cut off small ℓΩ for clean log–log plotting
-    vals_cut = vals[cutoff_idx:]
-    obs_cut  = obs_p[cutoff_idx:]
-    uni_cut  = uni_p[cutoff_idx:]
-    phys_cut = phys_p[cutoff_idx:]
+def fetch_debian_binary_package_sizes(
+    suite: str = "stable",
+    component: str = "main",
+    arch: str = "amd64",
+    timeout: float = 60.0,
+    compression: str = "auto",
+) -> tuple[list[int], str]:
+    text, url = fetch_debian_binary_index(
+        suite=suite,
+        component=component,
+        arch=arch,
+        timeout=timeout,
+        compression=compression,
+    )
+    return parse_debian_binary_package_sizes(text), url
 
-    # 6) KL divergences
-    print(f"KL(obs ‖ pure Ω)    = {kl_div(obs_cut, phys_cut):.4f}")
-    print(f"KL(obs ‖ uniform)   = {kl_div(obs_cut, uni_cut):.4f}")
 
-    # 7) fit y = a x + c to x=ℓΩ, y=–log(obs)
-    x = vals_cut
-    y = -np.log(obs_cut)
-    a, c = np.polyfit(x, y, 1)
-    print(f"Fitted scaled Ω:     slope a = {a:.3f}, intercept c = {c:.3f}")
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run finite-support Omega diagnostics on Debian package/source file sizes."
+    )
+    parser.add_argument(
+        "--dataset",
+        choices=["binary", "source"],
+        default="binary",
+        help="Debian dataset: binary package archive sizes or source-index file sizes",
+    )
+    parser.add_argument("--suite", default="stable", help="Debian suite, e.g. stable or testing")
+    parser.add_argument("--component", default="main", help="Debian component, e.g. main")
+    parser.add_argument("--arch", default="amd64", help="Debian binary package architecture")
+    parser.add_argument(
+        "--compression",
+        choices=["auto", "xz", "gz"],
+        default="auto",
+        help="Sources index compression to fetch",
+    )
+    parser.add_argument(
+        "--file-kind",
+        choices=["all", "archives", "dsc"],
+        default="all",
+        help="which source-index files to include",
+    )
+    parser.add_argument("--timeout", type=float, default=60.0, help="HTTP timeout in seconds")
+    parser.add_argument("--bootstrap", type=int, default=1000, help="bootstrap replicates")
+    parser.add_argument("--seed", type=int, default=20240524, help="bootstrap RNG seed")
+    parser.add_argument(
+        "--tail-drop",
+        type=int,
+        default=5,
+        help="number of smallest observed Omega-codelength bins to drop before fitting",
+    )
+    parser.add_argument("--output-prefix", default=None, help="prefix for output PNG/CSV files")
+    parser.add_argument("--metrics-csv", default=None, help="optional metrics CSV path")
+    parser.add_argument(
+        "--sizes-csv",
+        default=None,
+        help="raw size CSV path",
+    )
+    parser.add_argument(
+        "--use-sizes-csv",
+        action="store_true",
+        help="read --sizes-csv instead of querying Debian",
+    )
+    parser.add_argument("--show", action="store_true", help="also display figures interactively")
+    return parser.parse_args()
 
-    # 8) build the scaled Ω-prior
-    scaled_unn = np.exp(-(a * vals_cut + c))
-    scaled_p   = scaled_unn / scaled_unn.sum()
-    print(f"KL(obs ‖ scaled Ω)  = {kl_div(obs_cut, scaled_p):.4f}")
 
-    # 9) Plot: observed vs. pure priors
-    plt.figure(figsize=(8,5))
-    plt.loglog(vals_cut, obs_cut,    '.', label='Observed')
-    plt.loglog(vals_cut, phys_cut,   '.', label='Pure Ω-prior')
-    plt.loglog(vals_cut, uni_cut,    '.', label='Uniform')
-    plt.xlabel('ℓΩ(package size)')
-    plt.ylabel('Probability')
-    plt.title('Debian .deb Package Sizes vs. Priors')
-    plt.legend()
-    plt.grid(True, which='both', ls='--', alpha=0.4)
-    plt.tight_layout()
-    plt.show()
+def main() -> None:
+    args = parse_args()
+    from omega_models import analyze_sizes, read_size_csv, write_size_csv
 
-    # 10) Plot: including scaled Ω-prior
-    plt.figure(figsize=(8,5))
-    plt.loglog(vals_cut, obs_cut,     '.', label='Observed')
-    plt.loglog(vals_cut, phys_cut,    '.', label='Pure Ω-prior')
-    plt.loglog(vals_cut, scaled_p,    '.', label='Scaled Ω-prior')
-    plt.loglog(vals_cut, uni_cut,     '.', label='Uniform')
-    plt.xlabel('ℓΩ(package size)')
-    plt.ylabel('Probability')
-    plt.title('Debian .deb Package Sizes with Scaled Ω Fit')
-    plt.legend()
-    plt.grid(True, which='both', ls='--', alpha=0.4)
-    plt.tight_layout()
-    plt.show()
+    output_prefix = args.output_prefix or ("debian" if args.dataset == "binary" else "debian_source")
+    sizes_csv = args.sizes_csv or (
+        "debian_binary_package_sizes.csv"
+        if args.dataset == "binary"
+        else "debian_source_file_sizes.csv"
+    )
 
-# ─── Main ─────────────────────────────────────────────────────────────────────
-if __name__ == '__main__':
-    print("Fetching Debian package sizes…")
-    sizes = fetch_debian_package_sizes(dist='stable', component='main', arch='amd64')
-    print(f"Collected {len(sizes)} package sizes.")
-    print("Running Elias Ω analysis against priors:\n")
-    analyze_sizes(sizes)
+    if args.use_sizes_csv:
+        print(f"Reading Debian {args.dataset} sizes from {sizes_csv}...")
+        sizes = read_size_csv(sizes_csv)
+        source_label = f"cached {len(sizes)} files"
+    else:
+        if args.dataset == "binary":
+            print(
+                f"Fetching Debian Packages index for "
+                f"{args.suite}/{args.component}/binary-{args.arch} ({args.compression})..."
+            )
+            sizes, url = fetch_debian_binary_package_sizes(
+                suite=args.suite,
+                component=args.component,
+                arch=args.arch,
+                timeout=args.timeout,
+                compression=args.compression,
+            )
+        else:
+            print(
+                f"Fetching Debian Sources index for "
+                f"{args.suite}/{args.component} ({args.compression})..."
+            )
+            sizes, url = fetch_debian_source_file_sizes(
+                suite=args.suite,
+                component=args.component,
+                timeout=args.timeout,
+                compression=args.compression,
+                file_kind=args.file_kind,
+            )
+        source_label = url
+        path = write_size_csv(sizes_csv, sizes)
+        print(f"Saved raw sizes: {path}")
+
+    print(f"Collected {len(sizes)} Debian {args.dataset} sizes. Running Omega-tail diagnostic...\n")
+    file_kind = f", {args.file_kind}" if args.dataset == "source" else f", {args.arch}"
+    analyze_sizes(
+        sizes,
+        label=f"Debian {args.dataset} sizes ({source_label}{file_kind})",
+        output_prefix=output_prefix,
+        n_bootstrap=args.bootstrap,
+        seed=args.seed,
+        tail_drop=args.tail_drop,
+        metrics_csv=args.metrics_csv,
+        show=args.show,
+    )
+
+
+if __name__ == "__main__":
+    main()
